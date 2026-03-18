@@ -36,18 +36,24 @@ async function run() {
 
     //find data from the collection
     app.get("/jobs", async (req, res) => {
-      const query = jobCollection.find();
-      const result = await query.toArray();
+      const email = req.query.email;
+      const query = {};
+      if(email){
+        query.hr_email = email;
+      }
+
+      const cursor = jobCollection.find(query);
+      const result = await cursor.toArray();
       res.send(result);
     });
 
     //insert a document in job collection
-    app.post("/jobs", async(req, res) => {
-        const newJob = req.body;
-        // console.log(newJob)
-        const result = await jobCollection.insertOne(newJob);
-        res.send(result);
-    })
+    app.post("/jobs", async (req, res) => {
+      const newJob = req.body;
+      // console.log(newJob)
+      const result = await jobCollection.insertOne(newJob);
+      res.send(result);
+    });
 
     // Find a doccument using id
     app.get("/jobs/:id", async (req, res) => {
@@ -92,6 +98,29 @@ async function run() {
       const result = await applicationCollection.insertOne(application);
       res.send(result);
     });
+
+    // Find all applications on a specific job
+    app.get("/applications/job/:id", async(req, res) => {
+        const jobId = req.params.id;
+        console.log(jobId)
+        const query = {jobId: jobId}
+        const result = await applicationCollection.find(query).toArray();
+        res.send(result)
+    })
+
+    // Update application status
+    app.patch("/applications/:id", async (req, res) => {
+        const id = req.params.id;
+        const status = req.body;
+        const filter = {_id: new ObjectId(id)}
+
+        const updatedDoc = {
+            $set: {status : req.body.status}
+        }
+
+        const result = await applicationCollection.updateOne(filter, updatedDoc);
+        res.send(result)
+    })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
