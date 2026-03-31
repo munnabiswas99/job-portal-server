@@ -1,18 +1,45 @@
 const express = require("express");
 const cors = require("cors");
 const app = express();
-var jwt = require('jsonwebtoken');
+var jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 
 const port = process.env.PORT || 3000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
+
+// Middlewares
 app.use(cookieParser());
-app.use(cors({
+app.use(
+  cors({
     origin: ["http://localhost:5173"],
-    credentials: true
-}));
+    credentials: true,
+  }),
+);
 app.use(express.json());
+
+const logger = (req, res, next) => {
+  console.log('inside the logger middleware');
+  next();
+}
+
+const verifyToken = (req, res, next) => {
+  const token = req?.cookies?.token;
+  if(!token){
+    return res.status(404).send({message: 'unauthorized access'})
+  }
+
+  // Verify Token
+  jwt.verify(token, process.env.JWT_ACCESS_SECRET, (err, decoded) => {
+    if(err){
+      return res.status(404).send({message: 'unauthorized access'})
+    }
+    req.decoded = decoded;
+    console.log(decoded);
+  })
+  console.log('cookie in the midleware', token);
+  next();
+}
 
 app.get("/", (req, res) => {
   res.send("Job portal is running");
@@ -40,23 +67,26 @@ async function run() {
       .db("jobPortal")
       .collection("application");
 
-      // jwt token related api
-      app.post('/jwt', async (req, res) => {
-        const userData = req.body;
-        const token = jwt.sign(userData, process.env.JWT_ACCESS_SECRET, {expiresIn: '1d'})
-        
-        res.cookie('token', token, {
-          httpOnly: true,
-          secure: false
-        })
-        res.send({success: true})
-      })
+    // jwt token related api
+    app.post("/jwt", async (req, res) => {
+      const userData = req.body;
+      const token = jwt.sign(userData, process.env.JWT_ACCESS_SECRET, {
+        expiresIn: "1d",
+      });
+
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: false,
+        sameSite: "strict",
+      });
+      res.send({ success: true });
+    });
 
     //find data from the collection
     app.get("/jobs", async (req, res) => {
       const email = req.query.email;
       const query = {};
-      if(email){
+      if (email) {
         query.hr_email = email;
       }
 
@@ -82,9 +112,12 @@ async function run() {
     });
 
     // Job Applications get api
-    app.get("/applications", async (req, res) => {
+    app.get("/applications",logger,verifyToken, async (req, res) => {
       const email = req.query.email;
-
+      // console.log('inside application api', req.cookies);
+      if(email !== req.decoded.email){
+        return res.status(403).send({message: 'forbidden access'})
+      }
       const query = {
         applicant: email,
       };
@@ -118,27 +151,27 @@ async function run() {
     });
 
     // Find all applications on a specific job
-    app.get("/applications/job/:id", async(req, res) => {
-        const jobId = req.params.id;
-        console.log(jobId)
-        const query = {jobId: jobId}
-        const result = await applicationCollection.find(query).toArray();
-        res.send(result)
-    })
+    app.get("/applications/job/:id", async (req, res) => {
+      const jobId = req.params.id;
+      console.log(jobId);
+      const query = { jobId: jobId };
+      const result = await applicationCollection.find(query).toArray();
+      res.send(result);
+    });
 
     // Update application status
     app.patch("/applications/:id", async (req, res) => {
-        const id = req.params.id;
-        const status = req.body;
-        const filter = {_id: new ObjectId(id)}
+      const id = req.params.id;
+      const status = req.body;
+      const filter = { _id: new ObjectId(id) };
 
-        const updatedDoc = {
-            $set: {status : req.body.status}
-        }
+      const updatedDoc = {
+        $set: { status: req.body.status },
+      };
 
-        const result = await applicationCollection.updateOne(filter, updatedDoc);
-        res.send(result)
-    })
+      const result = await applicationCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
