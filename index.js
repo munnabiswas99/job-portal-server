@@ -1,190 +1,250 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const app = express();
-var jwt = require("jsonwebtoken");
+const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
+const { MongoClient, ObjectId } = require("mongodb");
 
-const port = process.env.PORT || 3000;
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-require("dotenv").config();
+const app = express();
 
-// Middlewares
-app.use(cookieParser());
+//CORS Config
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: [
+      "http://localhost:5173",
+      "https://job-portal-11fa2.web.app",
+    ],
     credentials: true,
-  }),
-);
-app.use(express.json());
-
-const logger = (req, res, next) => {
-  console.log('inside the logger middleware');
-  next();
-}
-
-const verifyToken = (req, res, next) => {
-  const token = req?.cookies?.token;
-  if(!token){
-    return res.status(404).send({message: 'unauthorized access'})
-  }
-
-  // Verify Token
-  jwt.verify(token, process.env.JWT_ACCESS_SECRET, (err, decoded) => {
-    if(err){
-      return res.status(404).send({message: 'unauthorized access'})
-    }
-    req.decoded = decoded;
-    console.log(decoded);
   })
-  console.log('cookie in the midleware', token);
-  next();
-}
+);
 
-app.get("/", (req, res) => {
-  res.send("Job portal is running");
-});
+app.use(express.json());
+app.use(cookieParser());
 
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.etxtqbz.mongodb.net/?appName=Cluster0`;
+// JWT Middleware
+const verifyToken = (req, res, next) => {
+  const token = req.cookies?.token;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
-});
-
-async function run() {
-  try {
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
-
-    //connect to the collection
-    const jobCollection = client.db("jobPortal").collection("jobs");
-    const applicationCollection = client
-      .db("jobPortal")
-      .collection("application");
-
-    // jwt token related api
-    app.post("/jwt", async (req, res) => {
-      const userData = req.body;
-      const token = jwt.sign(userData, process.env.JWT_ACCESS_SECRET, {
-        expiresIn: "1d",
-      });
-
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: false,
-        sameSite: "strict",
-      });
-      res.send({ success: true });
-    });
-
-    //find data from the collection
-    app.get("/jobs", async (req, res) => {
-      const email = req.query.email;
-      const query = {};
-      if (email) {
-        query.hr_email = email;
-      }
-
-      const cursor = jobCollection.find(query);
-      const result = await cursor.toArray();
-      res.send(result);
-    });
-
-    //insert a document in job collection
-    app.post("/jobs", async (req, res) => {
-      const newJob = req.body;
-      // console.log(newJob)
-      const result = await jobCollection.insertOne(newJob);
-      res.send(result);
-    });
-
-    // Find a doccument using id
-    app.get("/jobs/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await jobCollection.findOne(query);
-      res.send(result);
-    });
-
-    // Job Applications get api
-    app.get("/applications",logger,verifyToken, async (req, res) => {
-      const email = req.query.email;
-      // console.log('inside application api', req.cookies);
-      if(email !== req.decoded.email){
-        return res.status(403).send({message: 'forbidden access'})
-      }
-      const query = {
-        applicant: email,
-      };
-
-      const result = await applicationCollection.find(query).toArray();
-
-      for (const application of result) {
-        const jobId = application.jobId;
-
-        const jobQuery = { _id: new ObjectId(jobId) };
-        const job = await jobCollection.findOne(jobQuery);
-
-        if (job) {
-          application.company = job.company;
-          application.title = job.title;
-          application.company_logo = job.company_logo;
-          application.location = job.location;
-          application.jobType = job.jobType;
-        }
-      }
-
-      res.send(result);
-    });
-
-    // Job application post api
-
-    app.post("/applications", async (req, res) => {
-      const application = req.body;
-      const result = await applicationCollection.insertOne(application);
-      res.send(result);
-    });
-
-    // Find all applications on a specific job
-    app.get("/applications/job/:id", async (req, res) => {
-      const jobId = req.params.id;
-      console.log(jobId);
-      const query = { jobId: jobId };
-      const result = await applicationCollection.find(query).toArray();
-      res.send(result);
-    });
-
-    // Update application status
-    app.patch("/applications/:id", async (req, res) => {
-      const id = req.params.id;
-      const status = req.body;
-      const filter = { _id: new ObjectId(id) };
-
-      const updatedDoc = {
-        $set: { status: req.body.status },
-      };
-
-      const result = await applicationCollection.updateOne(filter, updatedDoc);
-      res.send(result);
-    });
-
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
-    );
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
+  if (!token) {
+    return res.status(401).send({ message: "Unauthorized access" });
   }
-}
-run().catch(console.dir);
 
-app.listen(port, () => {
-  console.log(`Job Portal is listening on port ${port}`);
+  jwt.verify(token, process.env.JWT_ACCESS_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).send({ message: "Forbidden access" });
+    }
+
+    req.decoded = decoded;
+    next();
+  });
+};
+
+// Root Route
+app.get("/", (req, res) => {
+  res.send("Job portal server is running.");
 });
+
+// connect to MongoDB 
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.etxtqbz.mongodb.net/?retryWrites=true&w=majority`;
+
+let client;
+let db;
+
+async function connectDB() {
+  if (!client) {
+    client = new MongoClient(uri);
+    await client.connect();
+    db = client.db("jobPortal");
+    console.log("MongoDB connected");
+  }
+  return db;
+}
+
+// ==============================
+// JWT ROUTE
+// ==============================
+app.post("/jwt", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const token = jwt.sign(
+      { email },
+      process.env.JWT_ACCESS_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite:
+        process.env.NODE_ENV === "production" ? "none" : "lax",
+    });
+
+    res.send({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// JOB ROUTES
+// Get Jobs
+app.get("/jobs", async (req, res) => {
+  try {
+    const db = await connectDB();
+    const jobCollection = db.collection("jobs");
+
+    const email = req.query.email;
+    const query = email ? { hr_email: email } : {};
+
+    const result = await jobCollection.find(query).toArray();
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// Add Job
+app.post("/jobs", async (req, res) => {
+  try {
+    const db = await connectDB();
+    const jobCollection = db.collection("jobs");
+
+    const result = await jobCollection.insertOne(req.body);
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// Get Single Job
+app.get("/jobs/:id", async (req, res) => {
+  try {
+    const db = await connectDB();
+    const jobCollection = db.collection("jobs");
+
+    const result = await jobCollection.findOne({
+      _id: new ObjectId(req.params.id),
+    });
+
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// APPLICATION ROUTES
+// Get Applications (Protected)
+app.get("/applications", verifyToken, async (req, res) => {
+  try {
+    const db = await connectDB();
+    const applicationCollection = db.collection("application");
+    const jobCollection = db.collection("jobs");
+
+    const email = req.query.email;
+
+    if (email !== req.decoded.email) {
+      return res.status(403).send({ message: "Forbidden access" });
+    }
+
+    const applications = await applicationCollection
+      .find({ applicant: email })
+      .toArray();
+
+    // Attach job info
+    for (const appItem of applications) {
+      const job = await jobCollection.findOne({
+        _id: new ObjectId(appItem.jobId),
+      });
+
+      if (job) {
+        appItem.company = job.company;
+        appItem.title = job.title;
+        appItem.company_logo = job.company_logo;
+        appItem.location = job.location;
+        appItem.jobType = job.jobType;
+      }
+    }
+
+    res.send(applications);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// Apply Job
+app.post("/applications", async (req, res) => {
+  try {
+    const db = await connectDB();
+    const applicationCollection = db.collection("application");
+
+    const result = await applicationCollection.insertOne(req.body);
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// Applications by Job
+app.get("/applications/job/:id", async (req, res) => {
+  try {
+    const db = await connectDB();
+    const applicationCollection = db.collection("application");
+
+    const result = await applicationCollection
+      .find({ jobId: req.params.id })
+      .toArray();
+
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// Update Status
+app.patch("/applications/:id", async (req, res) => {
+  try {
+    const db = await connectDB();
+    const applicationCollection = db.collection("application");
+
+    const result = await applicationCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: req.body.status } }
+    );
+
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+// LOGOUT
+app.post("/logout", (req, res) => {
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite:
+      process.env.NODE_ENV === "production" ? "none" : "lax",
+  });
+
+  res.send({ success: true });
+});
+
+// EXPORT FOR VERCEL
+module.exports = app;
+
+// For Loaclhost
+const PORT = process.env.PORT || 3000;
+
+if (process.env.NODE_ENV !== "production") {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
