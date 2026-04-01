@@ -60,9 +60,7 @@ async function connectDB() {
   return db;
 }
 
-// ==============================
 // JWT ROUTE
-// ==============================
 app.post("/jwt", async (req, res) => {
   try {
     const { email } = req.body;
@@ -217,6 +215,23 @@ app.patch("/applications/:id", async (req, res) => {
       { _id: new ObjectId(req.params.id) },
       { $set: { status: req.body.status } }
     );
+
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: error.message });
+  }
+});
+
+app.delete("/application/:id", async (req, res) => {
+  try {
+    const db = await connectDB();
+    const applicationCollection = db.collection("application");
+
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+
+    const result = await applicationCollection.deleteOne(query);
 
     res.send(result);
   } catch (error) {
